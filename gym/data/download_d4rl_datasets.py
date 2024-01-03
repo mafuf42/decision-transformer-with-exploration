@@ -1,3 +1,4 @@
+import argparse
 import gym
 import numpy as np
 
@@ -6,11 +7,15 @@ import pickle
 
 import d4rl
 
+parser = argparse.ArgumentParser()
 
-datasets = ["hopper"]
+parser.add_argument
+
+
+datasets = ["halfcheetah", "hopper", "walker2d"]
 
 for env_name in datasets:
-    for dataset_type in ["medium"]:
+    for dataset_type in ["medium", "medium-replay", "medium-expert", "expert"]:
         name = f"{env_name}-{dataset_type}-v2"
         env = gym.make(name)
         dataset = env.get_dataset()
