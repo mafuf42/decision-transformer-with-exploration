@@ -1,4 +1,3 @@
-%%writefile conda_env.yml
 name: decision-transformer-gym
 channels:
 - pytorch
