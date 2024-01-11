@@ -4,7 +4,7 @@ import torch
 from decision_transformer.training.trainer import Trainer
 
 
-class SequenceTrainer(Trainer):
+class DTETrainer(Trainer):
     def train_step(self):
         (
             states,
@@ -13,6 +13,7 @@ class SequenceTrainer(Trainer):
             dones,
             rtg,
             timesteps,
+            r_explores,
             attention_mask,
         ) = self.get_batch(self.batch_size)
         action_target = torch.clone(actions)
@@ -23,6 +24,7 @@ class SequenceTrainer(Trainer):
             rewards,
             rtg[:, :-1],
             timesteps,
+            r_explores,
             attention_mask=attention_mask,
         )
 

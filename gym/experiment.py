@@ -11,11 +11,14 @@ import sys
 from decision_transformer.evaluation.evaluate_episodes import (
     evaluate_episode,
     evaluate_episode_rtg,
+    evaluate_episode_exploration,
 )
 from decision_transformer.models.decision_transformer import DecisionTransformer
+from decision_transformer.models.dt_exploration import DecisionTransformerExploration
 from decision_transformer.models.mlp_bc import MLPBCModel
 from decision_transformer.training.act_trainer import ActTrainer
 from decision_transformer.training.seq_trainer import SequenceTrainer
+from decision_transformer.training.dte_trainer import DTETrainer
 from decision_transformer.exploration.simhash import SimHash
 
 
@@ -75,7 +78,7 @@ def experiment(
     # exploration variants
     k = variant["k"]
     beta = variant["beta"]
-    hash = SimHash(state_dim, k, device)
+    simhash = SimHash(state_dim, k, device)
 
     # load dataset
     dataset_path = f"data/{env_name}-{dataset}-v2.pkl"
@@ -144,8 +147,12 @@ def experiment(
             s.append(traj["observations"][si : si + max_len].reshape(1, -1, state_dim))
             a.append(traj["actions"][si : si + max_len].reshape(1, -1, act_dim))
             r.append(traj["rewards"][si : si + max_len].reshape(1, -1, 1))
+            rp.append(
+                np.sqrt(simhash.count(traj["observations"][si : si + max_len])).reshape(
+                    1, -1, 1
+                )
+            )
 
-            print(s[-1].shape)
             if "terminals" in traj:
                 d.append(traj["terminals"][si : si + max_len].reshape(1, -1))
             else:
@@ -172,6 +179,7 @@ def experiment(
                 [np.ones((1, max_len - tlen, act_dim)) * -10.0, a[-1]], axis=1
             )
             r[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), r[-1]], axis=1)
+            rp[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), rp[-1]], axis=1)
             d[-1] = np.concatenate([np.ones((1, max_len - tlen)) * 2, d[-1]], axis=1)
             rtg[-1] = (
                 np.concatenate([np.zeros((1, max_len - tlen, 1)), rtg[-1]], axis=1)
@@ -193,6 +201,9 @@ def experiment(
             dtype=torch.float32, device=device
         )
         r = torch.from_numpy(np.concatenate(r, axis=0)).to(
+            dtype=torch.float32, device=device
+        )
+        rp = torch.from_numpy(np.concatenate(rp, axis=0)).to(
             dtype=torch.float32, device=device
         )
         d = torch.from_numpy(np.concatenate(d, axis=0)).to(
@@ -219,6 +230,21 @@ def experiment(
                             state_dim,
                             act_dim,
                             model,
+                            max_ep_len=max_ep_len,
+                            scale=scale,
+                            target_return=target_rew / scale,
+                            mode=mode,
+                            state_mean=state_mean,
+                            state_std=state_std,
+                            device=device,
+                        )
+                    elif model_type == "dte":
+                        ret, length = evaluate_episode_exploration(
+                            env,
+                            state_dim,
+                            act_dim,
+                            model,
+                            simhash,
                             max_ep_len=max_ep_len,
                             scale=scale,
                             target_return=target_rew / scale,
@@ -274,6 +300,21 @@ def experiment(
             hidden_size=variant["embed_dim"],
             n_layer=variant["n_layer"],
         )
+    elif model_type == "dte":
+        model = DecisionTransformerExploration(
+            state_dim=state_dim,
+            act_dim=act_dim,
+            max_length=K,
+            max_ep_len=max_ep_len,
+            hidden_size=variant["embed_dim"],
+            n_layer=variant["n_layer"],
+            n_head=variant["n_head"],
+            n_inner=4 * variant["embed_dim"],
+            activation_function=variant["activation_function"],
+            n_positions=1024,
+            resid_pdrop=variant["dropout"],
+            attn_pdrop=variant["dropout"],
+        )
     else:
         raise NotImplementedError
 
@@ -301,6 +342,16 @@ def experiment(
         )
     elif model_type == "bc":
         trainer = ActTrainer(
+            model=model,
+            optimizer=optimizer,
+            batch_size=batch_size,
+            get_batch=get_batch,
+            scheduler=scheduler,
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a) ** 2),
+            eval_fns=[eval_episodes(tar) for tar in env_targets],
+        )
+    elif model_type == "dte":
+        trainer = DTETrainer(
             model=model,
             optimizer=optimizer,
             batch_size=batch_size,
@@ -340,7 +391,7 @@ if __name__ == "__main__":
     parser.add_argument("--pct_traj", type=float, default=1.0)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument(
-        "--model_type", type=str, default="dt"
+        "--model_type", type=str, default="dte"
     )  # dt for decision transformer, bc for behavior cloning
     parser.add_argument("--embed_dim", type=int, default=128)
     parser.add_argument("--n_layer", type=int, default=3)
