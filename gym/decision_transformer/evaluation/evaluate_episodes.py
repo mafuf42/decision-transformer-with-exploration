@@ -209,7 +209,7 @@ def evaluate_episode_exploration(
 
         state, reward, done, _ = env.step(action)
 
-        re = simhash.count(state.reshape(1, state_dim), save=False)
+        re = simhash.count(state.reshape(1, state_dim), save=False)[0]
         cur_state = torch.from_numpy(state).to(device=device).reshape(1, state_dim)
         states = torch.cat([states, cur_state], dim=0)
         rewards[-1] = reward
