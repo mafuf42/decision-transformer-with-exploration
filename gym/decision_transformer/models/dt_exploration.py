@@ -77,13 +77,11 @@ class DecisionTransformerExploration(TrajectoryModel):
         time_embeddings = self.embed_timestep(timesteps)
         r_explore_embeddings = self.embed_return(r_explores)
 
-
         # time embeddings are treated similar to positional embeddings
         state_embeddings = state_embeddings + time_embeddings
         action_embeddings = action_embeddings + time_embeddings
         r_explore_embeddings = r_explore_embeddings + time_embeddings
         returns_embeddings = returns_embeddings + time_embeddings
-
 
         # this makes the sequence look like (R_1, s_1, a_1, R_2, s_2, a_2, ...)
         # which works nice in an autoregressive sense since states predict actions
@@ -149,7 +147,7 @@ class DecisionTransformerExploration(TrajectoryModel):
             actions = actions[:, -self.max_length :]
             returns_to_go = returns_to_go[:, -self.max_length :]
             timesteps = timesteps[:, -self.max_length :]
-            r_explores = [:, -self.max_length :]
+            r_explores = r_explores[:, -self.max_length :]
 
             # pad all tokens to sequence length
             attention_mask = torch.cat(
