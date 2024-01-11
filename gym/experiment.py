@@ -217,7 +217,7 @@ def experiment(
         )
         mask = torch.from_numpy(np.concatenate(mask, axis=0)).to(device=device)
 
-        return s, a, r, d, rtg, timesteps, mask
+        return s, a, r, d, rtg, timesteps, rp, mask
 
     def eval_episodes(target_rew):
         def fn(model):
