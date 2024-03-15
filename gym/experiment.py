@@ -7,6 +7,7 @@ import argparse
 import pickle
 import random
 import sys
+import utils
 
 from decision_transformer.evaluation.evaluate_episodes import (
     evaluate_episode,
@@ -37,6 +38,10 @@ def experiment(
     device = variant.get("device", "cuda")
     log_to_wandb = variant.get("log_to_wandb", False)
 
+    # seed everything
+    seed = variant.get("seed", 10)
+    utils.set_seed_everywhere(seed)
+
     env_name, dataset = variant["env"], variant["dataset"]
     model_type = variant["model_type"]
     group_name = f"{exp_prefix}-{env_name}-{dataset}"
@@ -66,6 +71,17 @@ def experiment(
         scale = 10.0
     else:
         raise NotImplementedError
+
+    # set env seed
+    env.seed(seed)
+    if hasattr(env.env, "wrapped_env"):
+        env.env.wrapped_env.seed(seed)
+    elif hasattr(env.env, "seed"):
+        env.env.seed(seed)
+    else:
+        pass
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
 
     if model_type == "bc":
         env_targets = env_targets[
@@ -130,6 +146,18 @@ def experiment(
     # used to reweight sampling so we sample according to timesteps instead of trajectories
     p_sample = traj_lens[sorted_inds] / sum(traj_lens[sorted_inds])
 
+    def pre_counting():
+        for i in sorted_inds:
+            traj = trajectories[i]
+            si = traj["observations"]
+            simhash.count(si)
+
+        return
+
+    pre_counting()
+    #     print(simhash.count(trajectories[0]["observations"]))
+    #     return
+
     def get_batch(batch_size=256, max_len=K):
         batch_inds = np.random.choice(
             np.arange(num_trajectories),
@@ -148,11 +176,10 @@ def experiment(
             a.append(traj["actions"][si : si + max_len].reshape(1, -1, act_dim))
             r.append(traj["rewards"][si : si + max_len].reshape(1, -1, 1))
             rp.append(
-                np.sqrt(simhash.count(traj["observations"][si : si + max_len])).reshape(
-                    1, -1, 1
-                )
+                np.sqrt(
+                    simhash.count(traj["observations"][si : si + max_len], save=False)
+                ).reshape(1, -1, 1)
             )
-
             if "terminals" in traj:
                 d.append(traj["terminals"][si : si + max_len].reshape(1, -1))
             else:
@@ -380,6 +407,7 @@ def experiment(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=10)
     parser.add_argument("--env", type=str, default="hopper")
     parser.add_argument(
         "--dataset", type=str, default="medium"
@@ -407,9 +435,10 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--log_to_wandb", "-w", type=bool, default=False)
     # exploration variants
-    parser.add_argument("--k", type=int, default=16)
+    parser.add_argument("--k", type=int, default=32)
     parser.add_argument("--beta", type=float, default=0.1)
 
     args = parser.parse_args()
+    utils.set_seed_everywhere(args.seed)
 
     experiment("gym-experiment", variant=vars(args))
