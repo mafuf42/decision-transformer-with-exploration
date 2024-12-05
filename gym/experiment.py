@@ -21,6 +21,7 @@ from decision_transformer.training.act_trainer import ActTrainer
 from decision_transformer.training.seq_trainer import SequenceTrainer
 from decision_transformer.training.dte_trainer import DTETrainer
 from decision_transformer.exploration.simhash import SimHash
+from decision_transformer.exploration.vqvae import VQVAECount
 
 
 def discount_cumsum(x, gamma):
@@ -43,6 +44,7 @@ def experiment(
     utils.set_seed_everywhere(seed)
 
     env_name, dataset = variant["env"], variant["dataset"]
+    explore_strat = variant["explore"]
     model_type = variant["model_type"]
     group_name = f"{exp_prefix}-{env_name}-{dataset}"
     exp_prefix = f"{group_name}-{random.randint(int(1e5), int(1e6) - 1)}"
@@ -94,7 +96,14 @@ def experiment(
     # exploration variants
     k = variant["k"]
     beta = variant["beta"]
-    simhash = SimHash(state_dim, k, device)
+
+    counting = None
+    if explore_strat == "simhash":
+        counting = SimHash(state_dim, k, device)
+    elif explore_strat == "vqvae":
+        counting = VQVAECount()
+    else:
+        pass
 
     # load dataset
     dataset_path = f"data/{env_name}-{dataset}-v2.pkl"
@@ -145,18 +154,22 @@ def experiment(
 
     # used to reweight sampling so we sample according to timesteps instead of trajectories
     p_sample = traj_lens[sorted_inds] / sum(traj_lens[sorted_inds])
+    
+    print(explore_strat)
+
+    all_data = []
+    for i in sorted_inds:
+        all_data.extend(trajectories[i]["observations"])
 
     def pre_counting():
-        for i in sorted_inds:
-            traj = trajectories[i]
-            si = traj["observations"]
-            simhash.count(si)
-
-        return
+        if explore_strat == "simhash":
+            counting.count(all_data)
+        elif explore_strat == "vqvae":
+            counting.train_vqvae(all_data)
+            counting.count(all_data)
 
     pre_counting()
-    #     print(simhash.count(trajectories[0]["observations"]))
-    #     return
+
 
     def get_batch(batch_size=256, max_len=K):
         batch_inds = np.random.choice(
@@ -177,7 +190,7 @@ def experiment(
             r.append(traj["rewards"][si : si + max_len].reshape(1, -1, 1))
             rp.append(
                 np.sqrt(
-                    simhash.count(traj["observations"][si : si + max_len], save=False)
+                    counting.count(traj["observations"][si : si + max_len], save=False)
                 ).reshape(1, -1, 1)
             )
             if "terminals" in traj:
@@ -248,6 +261,7 @@ def experiment(
 
     def eval_episodes(target_rew):
         def fn(model):
+            out_states = []
             returns, lengths = [], []
             for _ in range(num_eval_episodes):
                 with torch.no_grad():
@@ -266,12 +280,12 @@ def experiment(
                             device=device,
                         )
                     elif model_type == "dte":
-                        ret, length = evaluate_episode_exploration(
+                        ret, length, sts = evaluate_episode_exploration(
                             env,
                             state_dim,
                             act_dim,
                             model,
-                            simhash,
+                            counting,
                             max_ep_len=max_ep_len,
                             scale=scale,
                             target_return=target_rew / scale,
@@ -295,12 +309,17 @@ def experiment(
                         )
                 returns.append(ret)
                 lengths.append(length)
+                out_states.append(sts)
+                
+            np.savez(f"/kaggle/working/eval_states_{target_rew}.npz", *out_states)
             return {
                 f"target_{target_rew}_return_mean": np.mean(returns),
                 f"target_{target_rew}_return_std": np.std(returns),
                 f"target_{target_rew}_length_mean": np.mean(lengths),
                 f"target_{target_rew}_length_std": np.std(lengths),
             }
+        
+
 
         return fn
 
@@ -437,6 +456,7 @@ if __name__ == "__main__":
     # exploration variants
     parser.add_argument("--k", type=int, default=32)
     parser.add_argument("--beta", type=float, default=0.1)
+    parser.add_argument("--explore", type=str, default="simhash")
 
     args = parser.parse_args()
     utils.set_seed_everywhere(args.seed)

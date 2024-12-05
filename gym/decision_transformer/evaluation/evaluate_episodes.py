@@ -1,6 +1,18 @@
 import numpy as np
+from sklearn.neighbors import KernelDensity
 import torch
+import joblib
 
+def estimate_kde(states, bandwidth=0.2):
+    """
+    Estimate the KDE for a given set of states.
+    
+    :param states: A numpy array of shape (n_samples, n_features) representing the states.
+    :param bandwidth: The bandwidth for the KDE (controls the smoothness of the density estimate).
+    :return: Fitted KernelDensity object.
+    """
+    kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(states)
+    return kde
 
 def evaluate_episode(
     env,
@@ -146,12 +158,13 @@ def evaluate_episode_rtg(
     return episode_return, episode_length
 
 
+
 def evaluate_episode_exploration(
     env,
     state_dim,
     act_dim,
     model,
-    simhash,
+    counting,
     max_ep_len=1000,
     scale=1000.0,
     state_mean=0.0,
@@ -162,6 +175,8 @@ def evaluate_episode_exploration(
 ):
     model.eval()
     model.to(device=device)
+    
+    visit_states = []
 
     state_mean = torch.from_numpy(state_mean).to(device=device)
     state_std = torch.from_numpy(state_std).to(device=device)
@@ -208,8 +223,10 @@ def evaluate_episode_exploration(
         action = action.detach().cpu().numpy()
 
         state, reward, done, _ = env.step(action)
+        
+        visit_states.append(state)
 
-        re = simhash.count(state.reshape(1, state_dim), save=False)[0]
+        re = counting.count(state.reshape(1, state_dim), save=False)[0]
         cur_state = torch.from_numpy(state).to(device=device).reshape(1, state_dim)
         states = torch.cat([states, cur_state], dim=0)
         rewards[-1] = reward
@@ -231,4 +248,4 @@ def evaluate_episode_exploration(
         if done:
             break
 
-    return episode_return, episode_length
+    return episode_return, episode_length, np.array(visit_states)

@@ -9,7 +9,7 @@ class SimHash(object):
         self.device = device
 
     def count(self, states, save=True):
-        """Increase the count for the states and retourn the counts"""
+        """Increase the count for the states and return the counts"""
         counts = []
         for state in states:
             key = str(np.sign(self.A @ state).tolist())
